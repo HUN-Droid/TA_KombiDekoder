@@ -16,7 +16,7 @@
 //#define SZOMSZED_KEZELO_BOARD
 
 #define useWs
-#define useMax
+//#define useMax
 //#define useBovito
 //#define useSzomszedKezelo
 
@@ -160,6 +160,23 @@ bool railNetSetParameter(uint8_t cim, uint8_t objektum, uint8_t dataType, bool s
     }
 }
 
+std::optional<RailNetCanMsg> railNetSysMsg(const RailNetCanMsg* msg) {
+    #ifdef useWs
+        if (msg->data[0] == 0x03) {
+            #ifdef DEBUG_RAILNET
+                Serial.println("CAN - éjszakai mód");
+            #endif
+            setFenyeroOsztaly(1);
+        } else if (msg->data[0] == 0x04) {
+            #ifdef DEBUG_RAILNET
+                Serial.println("CAN - nappali mód");
+            #endif
+            setFenyeroOsztaly(0);
+        }
+    #endif
+    return std::nullopt;
+}
+
 bool railNetGetParameter(uint8_t cim, uint8_t objektum, uint8_t dataType, CAN_message_t* CAN_msg) {
     uint8_t group = cim >> 6;
 
@@ -296,7 +313,7 @@ void setup() {
         #ifdef useDebug
             Serial.println("try setup spi");
         #endif
-        setupSPI2_DMA();
+        setupSPI1_DMA();
         #ifdef useDebug
             Serial.println("done spi");
         #endif

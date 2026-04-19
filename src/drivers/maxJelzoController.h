@@ -1,7 +1,7 @@
 class MAXJelzoController : public IJelzoController {
 public:
     MAXJelzoController() :
-        max7219(&hspi2, spiBusyCheck, maxSpiStart, spiDone, GPIOB, GPIO_PIN_3, MAX_CHIP_COUNT) {}
+        max7219(&hspi1, spiBusyCheck, maxSpiStart, spiDone, GPIOB, GPIO_PIN_3, MAX_CHIP_COUNT) {}
 
     void init() override {
         max7219.init();

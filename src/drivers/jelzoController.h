@@ -1,3 +1,18 @@
+enum class LedColor : uint8_t { RED = 0, YELLOW = 1, GREEN = 2, BLUE = 3, WHITE = 4 };
+#define LED_COLOR_COUNT 5
+#define BRIGHTNESS_DATASET_COUNT 8
+
+struct BrightnessLevel {
+    uint8_t brightness[LED_COLOR_COUNT]; // indexelés: LedColor enum értékével
+};
+
+struct BrightnessDataset {
+    BrightnessLevel level[2]; // level[0] = magas (nappali), level[1] = alacsony (éjszakai)
+};
+
+extern BrightnessDataset brightnessDatasets[BRIGHTNESS_DATASET_COUNT];
+extern uint8_t activeBrightnessLevel; // 0 = magas (nappali), 1 = alacsony (éjszakai)
+
 enum class JelzoMode : uint8_t {
     Bit,
     UNI_4x2, // 1 - 4 db 2 lencsés
@@ -15,7 +30,7 @@ typedef struct {
     JelzoMode mode;
     uint8_t portData;
     uint8_t alapallas[4];
-    uint8_t brightness[4];
+    uint8_t datasetIndex;
     uint8_t fadeSpeed[4];
     uint8_t blinkPhaseOn;
     uint8_t blinkPhaseOff;

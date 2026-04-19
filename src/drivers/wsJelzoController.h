@@ -1,7 +1,61 @@
+static LedColor getLedColor(JelzoMode mode, uint8_t bit) {
+    uint8_t lb; // local bit within group
+    switch (mode) {
+        case JelzoMode::UNI_4x2:
+            return (bit % 2 == 0) ? LedColor::RED : LedColor::GREEN;
+
+        case JelzoMode::UNI_2x3_1x2:
+            if (bit < 6) {
+                lb = bit % 3;
+                if (lb == 0) return LedColor::RED;
+                if (lb == 1) return LedColor::GREEN;
+                return LedColor::YELLOW;
+            }
+            return (bit == 6) ? LedColor::RED : LedColor::GREEN;
+
+        case JelzoMode::HV_2x4_elo:
+            lb = bit % 4;
+            return (lb < 2) ? LedColor::YELLOW : LedColor::GREEN;
+
+        case JelzoMode::HV_1x5_1x3: {
+            static const LedColor c5[] = {LedColor::RED, LedColor::RED, LedColor::GREEN, LedColor::YELLOW, LedColor::WHITE};
+            static const LedColor c3[] = {LedColor::RED, LedColor::GREEN, LedColor::YELLOW};
+            return (bit < 5) ? c5[bit] : c3[bit - 5];
+        }
+
+        case JelzoMode::MAV_2x4:
+            lb = bit % 4;
+            if (lb == 0) return LedColor::RED;
+            if (lb == 1) return LedColor::GREEN;
+            return LedColor::YELLOW;
+
+        case JelzoMode::MAV_1x5_1x3:
+        case JelzoMode::SK_1x5_1x3: {
+            static const LedColor c5m[] = {LedColor::RED, LedColor::GREEN, LedColor::YELLOW, LedColor::YELLOW, LedColor::WHITE};
+            static const LedColor c3m[] = {LedColor::RED, LedColor::GREEN, LedColor::YELLOW};
+            return (bit < 5) ? c5m[bit] : c3m[bit - 5];
+        }
+
+        case JelzoMode::MAV_Fenysorompo_1x2:
+            if (bit < 6) return (bit == 2 || bit == 5) ? LedColor::WHITE : LedColor::RED;
+            return (bit == 6) ? LedColor::RED : LedColor::GREEN;
+
+        case JelzoMode::SK_2x4:
+            lb = bit % 4;
+            if (lb == 0) return LedColor::RED;
+            if (lb == 1) return LedColor::GREEN;
+            if (lb == 2) return LedColor::YELLOW;
+            return LedColor::WHITE;
+
+        default:
+            return LedColor::WHITE;
+    }
+}
+
 class WSJelzoController : public IJelzoController {
 public:
     WSJelzoController() :
-        leds(&hspi2, spiBusyCheck, wsSpiStart, spiDone, GPIOB, GPIO_PIN_12) {
+        leds(&hspi1, spiBusyCheck, wsSpiStart, spiDone, GPIOB, GPIO_PIN_12) {
         }
 
     void init() override {
@@ -153,9 +207,13 @@ void updateDisplay(uint8_t portIndex) override {
         }
 
         // --- cél fényerő ---
-        uint8_t targetBrightness = finalState
-            ? jelzok[portIndex].brightness[jelzoGroup]
-            : 0;
+        uint8_t targetBrightness = 0;
+        if (finalState) {
+            LedColor color = getLedColor(jelzok[portIndex].mode, bit);
+            uint8_t dsIdx = jelzok[portIndex].datasetIndex;
+            if (dsIdx >= BRIGHTNESS_DATASET_COUNT) dsIdx = 0;
+            targetBrightness = brightnessDatasets[dsIdx].level[activeBrightnessLevel].brightness[static_cast<uint8_t>(color)];
+        }
 
         uint8_t speed = jelzok[portIndex].fadeSpeed[jelzoGroup];
 

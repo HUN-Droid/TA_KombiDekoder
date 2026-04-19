@@ -20,6 +20,8 @@
 #define MAX_JELZO_CV_OFFSET JELZO_CV_OFFSET
 // utána jön a ws
 #define WS_JELZO_CV_OFFSET (MAX_JELZO_CV_OFFSET + JELZO_CV_COUNT * MAX_CHIP_COUNT * 8)
+// utána a brightness dataset-ek
+#define BRIGHTNESS_DATASET_CV_OFFSET (WS_JELZO_CV_OFFSET + JELZO_CV_COUNT * WS_JELZO_PORT_COUNT)
 
 enum class SpiOwner { NONE, WS2811, MAX7219 };
 volatile SpiOwner spi_owner = SpiOwner::NONE;
@@ -46,6 +48,55 @@ void spiDone() {
 #include "jelzoController.h"
 #include "wsJelzoController.h"
 #include "maxJelzoController.h"
+
+BrightnessDataset brightnessDatasets[BRIGHTNESS_DATASET_COUNT];
+uint8_t activeBrightnessLevel = 0;
+static bool datasetsInitialized = false;
+
+static void setDefaultBrightnessDatasets() {
+    for (uint8_t d = 0; d < BRIGHTNESS_DATASET_COUNT; d++) {
+        brightnessDatasets[d].level[0].brightness[static_cast<uint8_t>(LedColor::RED)]    = 200;
+        brightnessDatasets[d].level[0].brightness[static_cast<uint8_t>(LedColor::YELLOW)] = 180;
+        brightnessDatasets[d].level[0].brightness[static_cast<uint8_t>(LedColor::GREEN)]  = 200;
+        brightnessDatasets[d].level[0].brightness[static_cast<uint8_t>(LedColor::BLUE)]   = 150;
+        brightnessDatasets[d].level[0].brightness[static_cast<uint8_t>(LedColor::WHITE)]  = 220;
+        brightnessDatasets[d].level[1].brightness[static_cast<uint8_t>(LedColor::RED)]    = 50;
+        brightnessDatasets[d].level[1].brightness[static_cast<uint8_t>(LedColor::YELLOW)] = 45;
+        brightnessDatasets[d].level[1].brightness[static_cast<uint8_t>(LedColor::GREEN)]  = 50;
+        brightnessDatasets[d].level[1].brightness[static_cast<uint8_t>(LedColor::BLUE)]   = 40;
+        brightnessDatasets[d].level[1].brightness[static_cast<uint8_t>(LedColor::WHITE)]  = 55;
+    }
+}
+
+void initBrightnessDatasets() {
+    if (datasetsInitialized) return;
+    datasetsInitialized = true;
+    if (EEPROM.read(BRIGHTNESS_DATASET_CV_OFFSET) == 255) {
+        setDefaultBrightnessDatasets();
+        return;
+    }
+    for (uint8_t d = 0; d < BRIGHTNESS_DATASET_COUNT; d++) {
+        for (uint8_t l = 0; l < 2; l++) {
+            for (uint8_t c = 0; c < LED_COLOR_COUNT; c++) {
+                brightnessDatasets[d].level[l].brightness[c] =
+                    EEPROM.read(BRIGHTNESS_DATASET_CV_OFFSET + (d * 2 + l) * LED_COLOR_COUNT + c);
+            }
+        }
+    }
+}
+
+void factoryResetBrightnessDatasets() {
+    setDefaultBrightnessDatasets();
+    for (uint8_t d = 0; d < BRIGHTNESS_DATASET_COUNT; d++) {
+        for (uint8_t l = 0; l < 2; l++) {
+            for (uint8_t c = 0; c < LED_COLOR_COUNT; c++) {
+                EEPROM.update(BRIGHTNESS_DATASET_CV_OFFSET + (d * 2 + l) * LED_COLOR_COUNT + c,
+                              brightnessDatasets[d].level[l].brightness[c]);
+            }
+        }
+    }
+    datasetsInitialized = true;
+}
 
 class JelzoDriver {
     public:
@@ -93,8 +144,16 @@ JelzoDriver wsJelzoDriver(wsJelzoController,WS_JELZO_CV_OFFSET);
 MAXJelzoController maxJelzoController;
 JelzoDriver maxJelzoDriver(maxJelzoController,MAX_JELZO_CV_OFFSET);
 
+void setFenyeroOsztaly(uint8_t level) {
+    if (level > 1) return;
+    activeBrightnessLevel = level;
+    for (uint8_t i = 0; i < wsJelzoController.getJelzokCount(); i++) {
+        wsJelzoController.updateDisplay(i);
+    }
+}
+
 extern "C" void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi) {
-    if (hspi->Instance == SPI2) {
+    if (hspi->Instance == SPI1) {
         digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));  // TODO: csak teszt
         if (spi_owner == SpiOwner::WS2811) {
             wsJelzoDriver.spiDMADone();
@@ -515,7 +574,8 @@ bool JelzoDriver::setJelzoPort(uint8_t cim, uint8_t objektum, uint8_t allas) {
  * @brief Jelzővezérlő funkciók inicializálása
  * 
  */
-void JelzoDriver::init() {  
+void JelzoDriver::init() {
+    initBrightnessDatasets();
     leds.init();
 
     uint8_t objCount;
@@ -557,9 +617,11 @@ void JelzoDriver::init() {
             break;
         }    
         
-        for(uint8_t j=0; j<4; j++) {            
+        uint8_t dsIdx = EEPROM.read(CV_OFFSET + JELZO_CV_COUNT*i + CV_JELZO_FENYERO);
+        jelzo.datasetIndex = (dsIdx < BRIGHTNESS_DATASET_COUNT) ? dsIdx : 0;
+
+        for(uint8_t j=0; j<4; j++) {
             jelzo.alapallas[j] = EEPROM.read(CV_OFFSET + JELZO_CV_COUNT*i + CV_JELZO_ALAPALLAS+j);
-            jelzo.brightness[j] = EEPROM.read(CV_OFFSET + JELZO_CV_COUNT*i + CV_JELZO_FENYERO+j);
             jelzo.fadeSpeed[j] = EEPROM.read(CV_OFFSET + JELZO_CV_COUNT*i + CV_JELZO_FADE_SPEED+j);
             if(j<objCount) {
                 setJelzoPort(i,j,jelzo.alapallas[j]);
@@ -579,13 +641,14 @@ void JelzoDriver::init() {
  * 
  */
 void JelzoDriver::factoryReset() {
+    factoryResetBrightnessDatasets();
     for(uint8_t i=0; i<leds.getJelzokCount(); i++) {
         EEPROM.update(CV_OFFSET + JELZO_CV_COUNT*i + CV_JELZO_MODE, 0); // bitenkénti állítás
+        EEPROM.update(CV_OFFSET + JELZO_CV_COUNT*i + CV_JELZO_FENYERO, 0); // dataset index 0
         for(uint8_t j=0; j<4; j++) {
             EEPROM.update(CV_OFFSET + JELZO_CV_COUNT*i + CV_JELZO_ALAPALLAS+j, 1); // alapállás vörös
-            EEPROM.update(CV_OFFSET + JELZO_CV_COUNT*i + CV_JELZO_FENYERO+j, 200); 
-            EEPROM.update(CV_OFFSET + JELZO_CV_COUNT*i + CV_JELZO_FADE_SPEED+j, 120); 
-        }        
+            EEPROM.update(CV_OFFSET + JELZO_CV_COUNT*i + CV_JELZO_FADE_SPEED+j, 120);
+        }
     }
 }
 
@@ -618,10 +681,8 @@ bool JelzoDriver::setParameter(uint8_t cim, uint8_t objektum, uint8_t dataType, 
                     jelzo.alapallas[i] = value;
                 }
                 return true;
-            case CV_JELZO_FENYERO: 
-                for(int i=oStart; i<=oEnd; i++) {
-                    jelzo.brightness[i] = value;
-                }
+            case CV_JELZO_FENYERO:
+                jelzo.datasetIndex = (value < BRIGHTNESS_DATASET_COUNT) ? value : 0;
                 return true;
             case CV_JELZO_FADE_SPEED: 
                 for(int i=oStart; i<=oEnd; i++) {
@@ -632,9 +693,9 @@ bool JelzoDriver::setParameter(uint8_t cim, uint8_t objektum, uint8_t dataType, 
         }
     } else {
         EEPROM.update(CV_OFFSET + JELZO_CV_COUNT*cim + CV_JELZO_MODE, static_cast<uint8_t>(jelzo.mode));
+        EEPROM.update(CV_OFFSET + JELZO_CV_COUNT*cim + CV_JELZO_FENYERO, jelzo.datasetIndex);
         for(int i=oStart; i<=oEnd; i++) {
             EEPROM.update(CV_OFFSET + JELZO_CV_COUNT*cim + CV_JELZO_ALAPALLAS+i, jelzo.alapallas[i]);
-            EEPROM.update(CV_OFFSET + JELZO_CV_COUNT*cim + CV_JELZO_FENYERO+i, jelzo.brightness[i]);
             EEPROM.update(CV_OFFSET + JELZO_CV_COUNT*cim + CV_JELZO_FADE_SPEED+i, jelzo.fadeSpeed[i]);
         }
         return true;
@@ -669,8 +730,8 @@ bool JelzoDriver::getParameter(uint8_t cim, uint8_t objektum, uint8_t dataType, 
         case CV_JELZO_ALAPALLAS: 
             CAN_msg->buf[3] = jelzo.alapallas[objektum];
             return true;
-        case CV_JELZO_FENYERO: 
-            CAN_msg->buf[3] = jelzo.brightness[objektum];
+        case CV_JELZO_FENYERO:
+            CAN_msg->buf[3] = jelzo.datasetIndex;
             return true;
         case CV_JELZO_FADE_SPEED: 
             CAN_msg->buf[3] = jelzo.fadeSpeed[objektum];
